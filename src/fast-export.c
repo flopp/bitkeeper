@@ -21,6 +21,7 @@
 typedef struct {
 	char	*branch;
 	char	*baserepo;
+	char	*commentCmd;
 	u32	addMD5Keys:1;
 	u32	md5KeysAsSubject:1;
 	u32	nested:1;
@@ -89,6 +90,7 @@ fastexport_main(int ac, char **av)
 		{ "bk-regressions", 320},
 		{ "incremental;", 325},
 		{ "no-bk-keys", 330},
+		{ "comment-cmd;", 335},
 		{ "standalone", 'S' },
 		{ "quiet", 'q'},
 
@@ -123,6 +125,9 @@ fastexport_main(int ac, char **av)
 		    case 330:	/* --no-bk-keys */
 			opts.addMD5Keys = 0;
 			break;
+		    case 335:	/* --comment-cmd */
+			opts.commentCmd = strdup(optarg);
+			break;
 		    default: bk_badArg(c, av);
 		}
 	}
@@ -136,6 +141,7 @@ fastexport_main(int ac, char **av)
 	rc = gitExport(&opts);
 out:	free(opts.branch);
 	free(opts.baserepo);
+	free(opts.commentCmd);
 	return (rc);
 }
 
@@ -434,6 +440,32 @@ gitOpCmp(const void *a, const void *b)
 	return (*op1.op - *op2.op);
 }
 
+
+private void
+createComment(FILE* f, char* cmd, sccs* cset, ser_t d) {
+	FILE* fp;
+	char buf[512];
+	char cmdbuf[512];
+
+	if (snprintf(cmdbuf, 512, "%s %s", cmd, REV(cset, d)) >= 512) {
+		fprintf(stderr, "fast-export: failed to concat '%s' and '%s'\n", cmd, REV(cset, d));
+		exit(1);
+	}
+
+	fp = popen(cmdbuf, "r");
+	if (!fp) {
+		fprintf(stderr, "fast-export: failed to run command: %s\n", cmdbuf);
+		exit(1);
+	}
+
+	while (fgets(buf, 511, fp)) {
+		fputs(buf, f);
+	}
+
+	pclose(fp);
+}
+
+
 private int
 gitExport(opts *op)
 {
@@ -642,7 +674,9 @@ gitExport(opts *op)
 			sccs_md5delta(cset, d, md5key);
 		}
 		if (op->md5KeysAsSubject) fprintf(f1, "%s\n\n", md5key);
-		if (HAS_COMMENTS(cset, d)) {
+		if (op->commentCmd) {
+			createComment(f1, op->commentCmd, cset, d);
+		} else if (HAS_COMMENTS(cset, d)) {
 			fprintf(f1, "%s", COMMENTS(cset, d));
 		}
 		if (op->addMD5Keys) {
